@@ -1081,7 +1081,7 @@ fn get_api_server_(api: String, custom: String) -> String {
             return format!("http://{}", s);
         }
     }
-    "http://47.103.198.242:21114".to_owned()
+    "https://rust.igame.plus".to_owned()
 }
 
 #[inline]
