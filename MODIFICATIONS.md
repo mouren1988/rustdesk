@@ -1,14 +1,44 @@
 # RustDesk 修改项文档（`rustdesk` 分支 vs 上游原版）
 
 > 生成时间：2026-10-23
-> 对比基准：上游原版提交 `5abae617d`（*Italian language update (#14949)*）
-> 本文所在分支：`rustdesk`（HEAD = `1a83f83d6`）
+> 上游基准：`upstream/master`（官方 `rustdesk/rustdesk`）
+> 本文所在分支：`rustdesk`（HEAD = `89cff8ae0`，已合并上游至 **v1.5.1**）
+
+---
+
+## 〇、分支结构与同步方式
+
+```
+origin    https://github.com/mouren1988/rustdesk.git   ← 你的仓库（推送目标）
+upstream  https://github.com/rustdesk/rustdesk.git     ← 官方原版
+
+master    398364fa1  [upstream/master]  官方原版 v1.5.1  ← 同步上游用
+rustdesk  89cff8ae0  v1.5.1 + 7 个自定义提交             ← 开发用
+```
+
+**日常同步上游**：
+
+```powershell
+git checkout master
+git pull                      # 拉取官方最新
+git checkout rustdesk
+git merge master              # 解冲突（见第四节）
+git submodule update --init --recursive
+```
+
+> 子模块 `libs/hbb_common` 需额外处理：其定制提交在 `feature/custom-servers` 分支，
+> 位于官方 `upstream/main` 之上 2 个提交。同步时需先 rebase 再 cherry-pick。
+
+**备份分支**（合并前的历史，可随时回退）：
+
+- `backup/master-before-upstream` = `167fe19db`
+- `backup/rustdesk-pre-merge` = `1a83f83d6`
 
 ---
 
 ## 一、总览
 
-`rustdesk` 分支在上游原版基础上共 7 个提交（含子模块内 2 个提交），改动可归为 5 大类：
+`rustdesk` 分支在官方 v1.5.1 基础上叠加 7 个自定义提交（另含子模块内 2 个提交），改动可归为 5 大类：
 
 | 类别 | 涉及文件 | 说明 |
 |---|---|---|
@@ -279,51 +309,57 @@ timestamp = 1777992741043
 
 ---
 
-## 四、分支与同步策略
+## 四、v1.4.6 → v1.5.1 上游合并记录（2026-10-23）
 
-```
-rustdesk (1a83f83d6)  ← 你的修改版，含全部定制
-    │
-    └─ 167fe19db
-        └─ b7b91b0d5
-            └─ 3646bc925  556607439  8f20c22f9  2cd015fc6
-                └─ 5abae617d  ← 上游原版分叉点
-                    └─ master (167fe19db) ← 跟踪 origin/master
-```
+本次将 `rustdesk` 从 v1.4.6 合并到官方 v1.5.1（上游领先 473 个提交，534 个文件）。
 
-同步上游：
+**冲突 4 处，处理如下**：
+
+| 冲突文件 | 处理方式 |
+|---|---|
+| `Cargo.toml` | 合并双方：保留上游新增的 `libs/base` member + 你的 `tools/agent-bg`；`exclude` 采用上游（上游已删除 `examples/custom_plugin`） |
+| `Cargo.lock` | 保留 HEAD 侧（上游删除了 `tracing-subscriber` / `tracing-log` / `valuable`，但 `tools/agent-bg` 仍依赖） |
+| `flutter/pubspec.lock` | 删除 `external_path` / `fake_async` 条目（上游已从 `pubspec.yaml` 移除该依赖） |
+| `libs/hbb_common` | rebase 2 个自定义提交到 `upstream/main`（`edefa08b`），得到 `f1d4928` |
+
+**子模块处理**：
 
 ```powershell
-git checkout master
-git pull
-git checkout rustdesk
-git merge master        # 有冲突时优先保留 src/common.rs 与 hbb_common/config.rs
-git submodule update --init --recursive
+cd libs/hbb_common
+git checkout -b feature/custom-servers upstream/main
+git cherry-pick be9a71d 07b1c45     # 你的 2 个自定义提交，干净应用
+git push origin feature/custom-servers:main --force-with-lease
 ```
+
+**验证结果**：`cargo check --workspace` 通过（exit 0，22m19s），仅上游自身 dead-code 警告，无错误。
+
+**后续同步子模块**：每次合并上游后，需重复上面的 rebase 流程。
 
 ---
 
 ## 五、改动文件清单
 
-```
-父仓库（12 个文件）
-  M  Cargo.lock
-  M  Cargo.toml
-  M  build.py
-  M  src/common.rs
-  M  flutter/lib/desktop/pages/connection_page.dart
-  M  flutter/pubspec.lock
-  M  libs/scrap/build.rs
-  M  libs/scrap/src/bindings/aom_ffi.h
-  M  libs/scrap/src/bindings/vpx_ffi.h
-  M  .gitmodules
-  A  libs/portable/app_metadata.toml
-  A  scripts/Enter-RustdeskBuildEnv.ps1
-  A  scripts/build-agent-bg.ps1
-  A  scripts/build-windows.ps1
-  A  tools/agent-bg/Cargo.toml
-  A  tools/agent-bg/src/main.rs
+相对官方 v1.5.1，你的改动共 14 个文件：
 
-子模块 libs/hbb_common（2 个提交）
-  M  src/config.rs
+```
+父仓库
+  M  .gitmodules                          子模块 URL 指向你的 fork
+  M  Cargo.toml                           workspace 新增 tools/agent-bg
+  M  Cargo.lock                           新增 agent-bg 及 windows 系列依赖
+  M  build.py                             python3 → python（Windows 分支）
+  M  src/common.rs                        API 服务器地址
+  M  flutter/lib/desktop/pages/connection_page.dart   移除客户端广告
+  M  libs/scrap/build.rs                  MSVC bindgen 支持
+  M  libs/scrap/src/bindings/aom_ffi.h    include 顺序
+  M  libs/scrap/src/bindings/vpx_ffi.h    include 顺序
+  A  scripts/Enter-RustdeskBuildEnv.ps1   构建环境脚本
+  A  scripts/build-agent-bg.ps1           agent-bg 构建脚本
+  A  scripts/build-windows.ps1            Windows 客户端构建脚本
+  A  tools/agent-bg/Cargo.toml            后台测试程序
+  A  tools/agent-bg/src/main.rs
+  A  libs/portable/app_metadata.toml      便携版打包元数据
+  A  MODIFICATIONS.md                     本文档
+
+子模块 libs/hbb_common（feature/custom-servers，领先 upstream/main 2 个提交）
+  M  src/config.rs                        rendezvous 服务器、公钥、硬编码密码、默认配置项
 ```
