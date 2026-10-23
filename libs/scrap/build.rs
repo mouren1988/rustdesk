@@ -23,6 +23,54 @@ fn link_pkg_config(_name: &str) -> Vec<PathBuf> {
     unimplemented!()
 }
 
+#[cfg(windows)]
+fn clang_msvc_include(b: bindgen::Builder, dir: &Path) -> bindgen::Builder {
+    if dir.as_os_str().is_empty() || !dir.is_dir() {
+        return b;
+    }
+    b.clang_arg(format!("-I{}", dir.display()))
+}
+
+#[cfg(windows)]
+fn apply_windows_bindgen_clang_args(mut b: bindgen::Builder) -> bindgen::Builder {
+    b = b
+        .clang_arg("--target=x86_64-pc-windows-msvc")
+        .clang_arg("-fms-compatibility")
+        .clang_arg("-fms-extensions");
+    if let Ok(inc) = env::var("INCLUDE") {
+        for dir in env::split_paths(&inc) {
+            b = clang_msvc_include(b, &dir);
+        }
+    }
+    if let Ok(vc) = env::var("VCINSTALLDIR") {
+        let msvc_root = Path::new(vc.trim_end_matches('\\')).join("Tools").join("MSVC");
+        if let Ok(entries) = fs::read_dir(&msvc_root) {
+            let mut dirs: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect();
+            dirs.sort();
+            if let Some(v) = dirs.pop() {
+                b = clang_msvc_include(b, &v.join("include"));
+            }
+        }
+    }
+    if let (Ok(sdk), Ok(ver)) = (env::var("WindowsSdkDir"), env::var("WindowsSDKVersion")) {
+        let ver_trim = ver.trim().trim_end_matches('\\').trim_matches('"');
+        let base = Path::new(sdk.trim_end_matches('\\')).join("Include").join(ver_trim);
+        for sub in ["ucrt", "shared", "um"] {
+            b = clang_msvc_include(b, &base.join(sub));
+        }
+    }
+    b
+}
+
+#[cfg(not(windows))]
+fn apply_windows_bindgen_clang_args(b: bindgen::Builder) -> bindgen::Builder {
+    b
+}
+
 /// Link vcpkg package.
 fn link_vcpkg(mut path: PathBuf, name: &str) -> PathBuf {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
@@ -154,11 +202,16 @@ fn generate_bindings(
         .layout_tests(false) // breaks 32/64-bit compat
         .generate_comments(false); // comments have prefix /*!\
 
+    b = apply_windows_bindgen_clang_args(b);
+
     for dir in include_paths {
         b = b.clang_arg(format!("-I{}", dir.display()));
     }
 
-    b.generate().unwrap().write_to_file(ffi_rs).unwrap();
+    b.generate()
+        .unwrap_or_else(|e| panic!("bindgen failed for {}: {e}", ffi_header.display()))
+        .write_to_file(ffi_rs)
+        .unwrap();
     fs::copy(ffi_rs, exact_file).ok(); // ignore failure
 }
 
