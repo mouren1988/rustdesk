@@ -310,12 +310,14 @@ class _ConnectionPageState extends State<ConnectionPage>
   void onConnect(
       {bool isFileTransfer = false,
       bool isViewCamera = false,
-      bool isTerminal = false}) {
+      bool isTerminal = false,
+      bool isTcpTunneling = false}) {
     var id = _idController.id;
     connect(context, id,
         isFileTransfer: isFileTransfer,
         isViewCamera: isViewCamera,
-        isTerminal: isTerminal);
+        isTerminal: isTerminal,
+        isTcpTunneling: isTcpTunneling);
   }
 
   /// UI for the remote ID TextField.
@@ -378,6 +380,7 @@ class _ConnectionPageState extends State<ConnectionPage>
                                   .contains(textToFind) ||
                               peer.alias.toLowerCase().contains(textToFind))
                           .toList();
+                      _allPeersLoader.queryOnlines(_autocompleteOpts);
                     }
                     return _autocompleteOpts;
                   },
@@ -547,6 +550,14 @@ class _ConnectionPageState extends State<ConnectionPage>
                                       '${translate('Terminal')} (beta)',
                                       () => onConnect(isTerminal: true)
                                     ),
+                                    // `connect` routes this through the
+                                    // desktop path only; the peer card gates
+                                    // it the same way.
+                                    if (isDesktop)
+                                      (
+                                        'TCP tunneling',
+                                        () => onConnect(isTcpTunneling: true)
+                                      ),
                                   ]
                                       .map((e) => MenuEntryButton<String>(
                                             childBuilder: (TextStyle? style) =>
